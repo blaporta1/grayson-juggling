@@ -20,3 +20,8 @@ Thumbs.db
 # Editor
 .vscode/
 .idea/
+
+# Claude Code internal
+GEMINI.md
+SKILL.md
+tsconfig.tsbuildinfo
