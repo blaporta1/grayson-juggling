@@ -1,41 +1,29 @@
 'use client';
 
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import dynamic from 'next/dynamic';
 import { format } from 'date-fns';
 import { Flame, Trophy, PlusCircle, ChevronRight } from 'lucide-react';
-import type { Workout, Stats } from '@/lib/types';
+import type { Workout } from '@/lib/types';
 import { EXERCISES } from '@/lib/types';
+import { getAllWorkoutsSorted, getStats, localDateString } from '@/lib/storage';
 import WeeklyProgress from '@/components/WeeklyProgress';
 
-// Recharts uses browser APIs — load only on client
 const JugglesChart = dynamic(() => import('@/components/JugglesChart'), { ssr: false });
-
-function todayStr() {
-  const d = new Date();
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-}
 
 export default function Dashboard() {
   const [workouts, setWorkouts] = useState<Workout[]>([]);
-  const [stats, setStats]       = useState<Stats & { totalWorkouts: number }>({ streak: 0, personalBest: 0, weeklyJuggles: 0, weeklyWorkouts: 0, totalWorkouts: 0 });
-  const [loading, setLoading]   = useState(true);
-  const today = todayStr();
+  const [stats, setStats]       = useState({ streak: 0, personalBest: 0, totalWorkouts: 0 });
+  const [ready, setReady]       = useState(false);
+  const today = localDateString(new Date());
   const todayWorkout = workouts.find(w => w.date === today) ?? null;
 
-  const load = useCallback(async () => {
-    const [wRes, sRes] = await Promise.all([
-      fetch('/api/workouts'),
-      fetch('/api/stats'),
-    ]);
-    const [ws, st] = await Promise.all([wRes.json(), sRes.json()]);
-    setWorkouts(ws);
-    setStats(st);
-    setLoading(false);
+  useEffect(() => {
+    setWorkouts(getAllWorkoutsSorted());
+    setStats(getStats());
+    setReady(true);
   }, []);
-
-  useEffect(() => { load(); }, [load]);
 
   const exercisesDone = todayWorkout
     ? EXERCISES.filter(ex => todayWorkout[ex.key as keyof Workout]).length
@@ -71,11 +59,11 @@ export default function Dashboard() {
 
       {/* Today's workout */}
       <section>
-        <SectionHeader title="Today" />
-        {loading ? (
-          <SkeletonCard />
+        <h2 className="font-bold text-white text-base mb-3">Today</h2>
+        {!ready ? (
+          <div className="h-28 bg-gray-900 rounded-2xl animate-pulse border border-gray-800" />
         ) : todayWorkout ? (
-          <Link href="/workout" className="block">
+          <Link href="/workout">
             <div className="bg-gray-900 rounded-2xl p-4 border border-gray-800 hover:border-pitch-500/40 transition-colors">
               <div className="flex items-center justify-between mb-3">
                 <div>
@@ -90,7 +78,7 @@ export default function Dashboard() {
                 {EXERCISES.map(ex => (
                   <span
                     key={ex.key}
-                    className={`text-xs px-2.5 py-1 rounded-full font-medium transition-colors ${
+                    className={`text-xs px-2.5 py-1 rounded-full font-medium ${
                       todayWorkout[ex.key as keyof Workout]
                         ? 'bg-pitch-500/15 text-pitch-400 border border-pitch-500/30'
                         : 'bg-gray-800 text-gray-600'
@@ -116,16 +104,16 @@ export default function Dashboard() {
 
       {/* Weekly progress */}
       <section>
-        <SectionHeader title="This Week" />
+        <h2 className="font-bold text-white text-base mb-3">This Week</h2>
         <div className="bg-gray-900 rounded-2xl p-4 border border-gray-800">
-          {loading ? <div className="h-28 bg-gray-800 rounded-xl animate-pulse" /> : <WeeklyProgress workouts={workouts} />}
+          {ready ? <WeeklyProgress workouts={workouts} /> : <div className="h-28 bg-gray-800 rounded-xl animate-pulse" />}
         </div>
       </section>
 
       {/* Juggle trend chart */}
       {workouts.length >= 2 && (
         <section>
-          <SectionHeader title="Juggle Trend" />
+          <h2 className="font-bold text-white text-base mb-3">Juggle Trend</h2>
           <div className="bg-gray-900 rounded-2xl p-4 border border-gray-800">
             <JugglesChart workouts={workouts} />
           </div>
@@ -149,19 +137,15 @@ export default function Dashboard() {
         </section>
       )}
 
-      {workouts.length === 0 && !loading && (
+      {ready && workouts.length === 0 && (
         <div className="text-center py-10 text-gray-600">
           <p className="text-4xl mb-3">🌱</p>
-          <p className="font-semibold">No workouts yet</p>
+          <p className="font-semibold text-gray-400">No workouts yet</p>
           <p className="text-sm mt-1">Log your first session above</p>
         </div>
       )}
     </div>
   );
-}
-
-function SectionHeader({ title }: { title: string }) {
-  return <h2 className="font-bold text-white text-base mb-3">{title}</h2>;
 }
 
 function StatCard({ icon, label, value, sub }: { icon: React.ReactNode; label: string; value: string; sub: string }) {
@@ -195,8 +179,4 @@ function WorkoutRow({ workout, isToday }: { workout: Workout; isToday: boolean }
       </div>
     </div>
   );
-}
-
-function SkeletonCard() {
-  return <div className="h-28 bg-gray-900 rounded-2xl animate-pulse border border-gray-800" />;
 }

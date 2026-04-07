@@ -1,11 +1,12 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { format } from 'date-fns';
-import { Minus, Plus, Save, CheckCircle2, ArrowLeft } from 'lucide-react';
-import type { Workout } from '@/lib/types';
-import { EXERCISES, type ExerciseKey } from '@/lib/types';
+import { Save, CheckCircle2, ArrowLeft } from 'lucide-react';
+import type { ExerciseKey } from '@/lib/types';
+import { EXERCISES } from '@/lib/types';
+import { getWorkoutByDate, upsertWorkout, localDateString } from '@/lib/storage';
 import ExerciseToggle from '@/components/ExerciseToggle';
 
 type ExerciseState = Record<ExerciseKey, boolean>;
@@ -15,41 +16,30 @@ const DEFAULT_EXERCISES: ExerciseState = {
   plyometrics: false, splitLunges: false, pogos: false,
 };
 
-function todayStr() {
-  const d = new Date();
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-}
-
 export default function WorkoutPage() {
-  const router = useRouter();
-  const today = todayStr();
+  const router  = useRouter();
+  const today   = localDateString(new Date());
 
   const [juggles,   setJuggles]   = useState(0);
   const [exercises, setExercises] = useState<ExerciseState>(DEFAULT_EXERCISES);
-  const [saving,    setSaving]    = useState(false);
   const [saved,     setSaved]     = useState(false);
   const [rawInput,  setRawInput]  = useState('0');
 
-  // Load existing workout for today if it exists
-  const loadToday = useCallback(async () => {
-    const res = await fetch(`/api/workouts/${today}`);
-    if (!res.ok) return;
-    const data: Workout | null = await res.json();
-    if (data) {
-      setJuggles(data.juggles);
-      setRawInput(String(data.juggles));
+  useEffect(() => {
+    const existing = getWorkoutByDate(today);
+    if (existing) {
+      setJuggles(existing.juggles);
+      setRawInput(String(existing.juggles));
       setExercises({
-        neymar:        data.neymar,
-        outsideInside: data.outsideInside,
-        atws:          data.atws,
-        plyometrics:   data.plyometrics,
-        splitLunges:   data.splitLunges,
-        pogos:         data.pogos,
+        neymar:        existing.neymar,
+        outsideInside: existing.outsideInside,
+        atws:          existing.atws,
+        plyometrics:   existing.plyometrics,
+        splitLunges:   existing.splitLunges,
+        pogos:         existing.pogos,
       });
     }
   }, [today]);
-
-  useEffect(() => { loadToday(); }, [loadToday]);
 
   function adjustJuggles(delta: number) {
     const next = Math.max(0, juggles + delta);
@@ -61,10 +51,7 @@ export default function WorkoutPage() {
   function handleInputChange(val: string) {
     setRawInput(val);
     const n = parseInt(val, 10);
-    if (!isNaN(n) && n >= 0) {
-      setJuggles(n);
-      setSaved(false);
-    }
+    if (!isNaN(n) && n >= 0) { setJuggles(n); setSaved(false); }
   }
 
   function handleExerciseChange(key: string, value: boolean) {
@@ -72,23 +59,10 @@ export default function WorkoutPage() {
     setSaved(false);
   }
 
-  async function handleSave() {
-    setSaving(true);
-    try {
-      const res = await fetch('/api/workouts', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ date: today, juggles, ...exercises }),
-      });
-      if (!res.ok) throw new Error('Save failed');
-      setSaved(true);
-      setTimeout(() => router.push('/'), 1200);
-    } catch (err) {
-      console.error(err);
-      alert('Failed to save. Please try again.');
-    } finally {
-      setSaving(false);
-    }
+  function handleSave() {
+    upsertWorkout({ date: today, juggles, ...exercises });
+    setSaved(true);
+    setTimeout(() => router.push('/'), 1000);
   }
 
   const completedCount = Object.values(exercises).filter(Boolean).length;
@@ -115,13 +89,11 @@ export default function WorkoutPage() {
         <h2 className="text-sm font-semibold text-gray-400 uppercase tracking-wide mb-3">Juggle Count</h2>
         <div className="bg-gray-900 rounded-2xl p-5 border border-gray-800">
           <div className="flex items-center gap-4">
-            {/* Decrement */}
             <div className="flex gap-1.5">
               <CounterBtn label="-10" onClick={() => adjustJuggles(-10)} />
               <CounterBtn label="-1"  onClick={() => adjustJuggles(-1)} />
             </div>
 
-            {/* Number input */}
             <input
               type="number"
               value={rawInput}
@@ -131,14 +103,13 @@ export default function WorkoutPage() {
               min={0}
             />
 
-            {/* Increment */}
             <div className="flex gap-1.5">
               <CounterBtn label="+1"  onClick={() => adjustJuggles(1)} />
               <CounterBtn label="+10" onClick={() => adjustJuggles(10)} />
             </div>
           </div>
 
-          {/* Quick set presets */}
+          {/* Quick presets */}
           <div className="flex gap-2 mt-4 flex-wrap justify-center">
             {[50, 100, 200, 500, 1000].map(n => (
               <button
@@ -177,13 +148,9 @@ export default function WorkoutPage() {
           ))}
         </div>
 
-        {/* Select all / none */}
         <div className="flex gap-2 mt-3">
           <button
-            onClick={() => {
-              const allOn = Object.fromEntries(EXERCISES.map(e => [e.key, true])) as ExerciseState;
-              setExercises(allOn); setSaved(false);
-            }}
+            onClick={() => { setExercises(Object.fromEntries(EXERCISES.map(e => [e.key, true])) as ExerciseState); setSaved(false); }}
             className="flex-1 py-2 rounded-xl bg-gray-900 border border-gray-700 text-gray-400 text-sm hover:border-gray-500 transition-colors"
           >
             All done
@@ -197,23 +164,19 @@ export default function WorkoutPage() {
         </div>
       </section>
 
-      {/* Save button */}
+      {/* Save */}
       <button
         onClick={handleSave}
-        disabled={saving || saved}
+        disabled={saved}
         className={`w-full py-4 rounded-2xl font-bold text-base transition-all duration-200 flex items-center justify-center gap-2 ${
           saved
             ? 'bg-pitch-600 text-white'
             : 'bg-pitch-500 text-white active:scale-95 hover:bg-pitch-600 shadow-[0_0_20px_rgba(34,197,94,0.3)]'
         } disabled:opacity-70`}
       >
-        {saved ? (
-          <><CheckCircle2 size={20} /> Saved! Redirecting...</>
-        ) : saving ? (
-          <><span className="animate-spin inline-block w-5 h-5 border-2 border-white border-t-transparent rounded-full" /> Saving...</>
-        ) : (
-          <><Save size={20} /> Save Workout</>
-        )}
+        {saved
+          ? <><CheckCircle2 size={20} /> Saved!</>
+          : <><Save size={20} /> Save Workout</>}
       </button>
     </div>
   );
